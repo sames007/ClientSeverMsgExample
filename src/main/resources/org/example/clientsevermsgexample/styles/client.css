@@ -1,0 +1,75 @@
+/* client.css */
+
+/* overall window */
+.root-pane {
+    -fx-background-color: linear-gradient(to bottom, #004080, #001f3f);
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.5), 20, 0, 0, 0);
+}
+
+/* header container */
+.header-box {
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+    -fx-padding: 15;
+    -fx-border-radius: 0 0 10 10;
+    -fx-background-radius: 0 0 10 10;
+}
+
+/* header text */
+.header-label {
+    -fx-font-size: 26px;
+    -fx-text-fill: white;
+    -fx-font-family: "Segoe UI Semibold";
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.8), 4, 0, 0, 2);
+}
+
+/* chat area (history) */
+.chat-area {
+    -fx-background-color: rgba(224, 247, 250, 0.9);
+    -fx-border-color: #0288d1;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-font-family: "Segoe UI";
+    -fx-font-size: 14px;
+    -fx-focus-color: transparent;
+    -fx-padding: 10;
+}
+
+/* input container (footer) */
+.input-box {
+    -fx-background-color: rgba(255, 255, 255, 0.05);
+    -fx-border-width: 1 0 0 0;
+    -fx-border-color: rgba(255, 255, 255, 0.2) transparent transparent transparent;
+    -fx-spacing: 10;
+}
+
+/* message text field */
+.message-field {
+    -fx-background-color: white;
+    -fx-background-radius: 20;
+    -fx-border-radius: 20;
+    -fx-font-family: "Segoe UI";
+    -fx-font-size: 14px;
+    -fx-padding: 8 12;
+    -fx-focus-color: #64B5F6;
+    -fx-faint-focus-color: transparent;
+}
+
+/* Send & Connect buttons */
+.send-button {
+    -fx-background-color: linear-gradient(to bottom right, #2196F3, #64B5F6);
+    -fx-text-fill: white;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 20;
+    -fx-padding: 8 16;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 4, 0, 0, 2);
+}
+
+.send-button:hover {
+    -fx-background-color: linear-gradient(to bottom right, #1976D2, #42A5F5);
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.5), 6, 0, 0, 3);
+}
+
+.send-button:disabled {
+    -fx-opacity: 0.6;
+}

@@ -1,233 +1,373 @@
 package org.example.clientsevermsgexample;
 
-
-
+import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
-import javafx.fxml.FXMLLoader;
 import javafx.fxml.Initializable;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Group;
-import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.layout.*;
 import javafx.stage.Stage;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.URL;
 import java.net.UnknownHostException;
+import java.net.URL;
 import java.util.ResourceBundle;
 
-import static java.lang.Thread.sleep;
-
 public class MainController implements Initializable {
+
+    // === FXML-bound controls for the simple port-check UI ===
     @FXML
-    private ComboBox dropdownPort;
+    private ComboBox<String> dropdownPort; // dropdown of common ports
+    @FXML
+    private TextArea resultArea;           // shows connection results
+    @FXML
+    private TextField urlName;             // host input
+    @FXML
+    private Button clearBtn;               // clears the above fields
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        dropdownPort.getItems().addAll("7",     // ping
-                "13",     // daytime
-                "21",     // ftp
-                "23",     // telnet
-                "71",     // finger
-                "80",     // http
-                "119",     // nntp (news)
-                "161"      // snmp);
+        // Populate the port dropdown with some standard service ports
+        dropdownPort.getItems().addAll(
+                "7",   // ping
+                "13",  // daytime
+                "21",  // ftp
+                "23",  // telnet
+                "71",  // finger
+                "80",  // http
+                "119", // nntp
+                "161"  // snmp
         );
     }
 
-    @FXML
-    private Button clearBtn;
-
-
-
-    @FXML
-    private TextArea resultArea;
-
-    @FXML
-    private Label server_lbl;
-
-    @FXML
-    private Button testBtn;
-
-    @FXML
-    private Label test_lbl;
-
-    @FXML
-    private TextField urlName;
-
-    Socket socket1;
-
-    Label lb122, lb12;
-    TextField msgText;
-
+    /**
+     * Invoked when the user clicks “Check Connection.”
+     * Tries to open a short-lived socket to the given host+port.
+     */
     @FXML
     void checkConnection(ActionEvent event) {
-
         String host = urlName.getText();
-        int port = Integer.parseInt(dropdownPort.getValue().toString());
+        int port = Integer.parseInt(dropdownPort.getValue());
 
-        try {
-            Socket sock = new Socket(host, port);
-            resultArea.appendText(host + " listening on port " + port + "\n");
-            sock.close();
+        // Try-with-resources auto-closes the socket
+        try (Socket sock = new Socket(host, port)) {
+            resultArea.appendText(host + " is listening on port " + port + "\n");
         } catch (UnknownHostException e) {
-            resultArea.setText(String.valueOf(e) + "\n");
-            return;
-        } catch (Exception e) {
-            resultArea.appendText(host + " not listening on port "
-                    + port + "\n");
+            // Host name could not be resolved
+            resultArea.appendText("Unknown host: " + e.getMessage() + "\n");
+        } catch (IOException e) {
+            // Connection refused or timed out
+            resultArea.appendText(host + " not listening on port " + port + "\n");
         }
-
-
     }
 
-
+    /**
+     * Clears the host/port UI fields and log area.
+     */
     @FXML
     void clearBtn(ActionEvent event) {
-        resultArea.setText("");
-        urlName.setText("");
-
+        resultArea.clear();
+        urlName.clear();
     }
 
 
+    // ====================
+    // === SERVER SIDE ====
+    // ====================
 
+    @FXML
+    private TextArea serverChatArea;    // chat history display
+
+    @FXML
+    private TextField serverMsgText;    // input field for outgoing messages
+
+    @FXML
+    private Button serverSendBtn;       // Send button (disabled until connected)
+
+    private DataInputStream serverDis;  // incoming data from client
+    private DataOutputStream serverDos; // outgoing data to client
+    private Socket clientSocket;        // accepted client connection
+
+    /**
+     * Builds and shows the server chat UI, then spawns the server thread.
+     */
     @FXML
     void startServer(ActionEvent event) {
         Stage stage = new Stage();
-        Group root = new Group();
-        Label lb11 = new Label("Server");
-        lb11.setLayoutX(100);
-        lb11.setLayoutY(100);
 
-        lb12 = new Label("info");
-        lb12.setLayoutX(100);
-        lb12.setLayoutY(200);
-        root.getChildren().addAll(lb11, lb12);
-        Scene scene = new Scene(root, 600, 350);
+        // Use a BorderPane so we can semantically separate header, center, and footer.
+        BorderPane root = new BorderPane();
+        root.getStyleClass().add("root-pane");
+
+        // — HEADER —
+        Label header = new Label("Server Chat");
+        header.getStyleClass().add("header-label");
+        HBox headerBox = new HBox(header);
+        headerBox.getStyleClass().add("header-box");
+        headerBox.setAlignment(Pos.CENTER);
+        root.setTop(headerBox);
+
+        // — CENTER: chat history —
+        serverChatArea = new TextArea();
+        serverChatArea.getStyleClass().add("chat-area");
+        serverChatArea.setEditable(false);
+        serverChatArea.setWrapText(true);
+        serverChatArea.setPrefSize(380, 260);
+        VBox centerBox = new VBox(serverChatArea);
+        centerBox.setPadding(new Insets(10, 20, 10, 20));
+        root.setCenter(centerBox);
+
+        // — FOOTER: input + send —
+        serverMsgText = new TextField();
+        serverMsgText.getStyleClass().add("message-field");
+        serverMsgText.setPromptText("Type a message...");
+        HBox.setHgrow(serverMsgText, Priority.ALWAYS);
+
+        serverSendBtn = new Button("Send");
+        serverSendBtn.getStyleClass().add("send-button");
+        serverSendBtn.setDisable(true);
+        serverSendBtn.setOnAction(e -> sendServerMessage());
+
+        HBox inputBox = new HBox(10, serverMsgText, serverSendBtn);
+        inputBox.getStyleClass().add("input-box");
+        inputBox.setPadding(new Insets(0, 20, 20, 20));
+        root.setBottom(inputBox);
+
+        // — SCENE & SHOW —
+        Scene scene = new Scene(root, 420, 380);
+        scene.getStylesheets().add(getClass().getResource("styles/server.css").toExternalForm());
         stage.setScene(scene);
-        lb12.setText("Server is running and waiting for a client...");
-
         stage.setTitle("Server");
         stage.show();
 
-
         new Thread(this::runServer).start();
-
     }
 
-    String message;
-
+    /**
+     * Accepts one client and then loops reading messages.
+     * Enables Send button once connected.
+     */
     private void runServer() {
-        try {
+        try (ServerSocket serverSocket = new ServerSocket(6666)) {
+            appendServerText("Waiting for client...");
 
-            ServerSocket serverSocket = new ServerSocket(6666);
-            updateServer("Server is running and waiting for a client...");
-            while (true) { // Infinite loop
-                try {
-                    Socket clientSocket = serverSocket.accept();
-                    updateServer("Client connected!");
+            clientSocket = serverSocket.accept();
+            appendServerText("Client connected!");
 
-                    new Thread(() -> {
-                        try {
-                            sleep(3000);
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
-                    DataInputStream dis = new DataInputStream(clientSocket.getInputStream());
-                    DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream());
+            // Enable Send now that a client is connected
+            Platform.runLater(() -> serverSendBtn.setDisable(false));
 
-                    message = dis.readUTF();
-                    updateServer("Message from client: " + message);
+            // Wrap streams for UTF messaging
+            serverDis = new DataInputStream(clientSocket.getInputStream());
+            serverDos = new DataOutputStream(clientSocket.getOutputStream());
 
-                    // Sending a response back to the client
-                    dos.writeUTF("Received: " + message);
-
-                    dis.close();
-                    dos.close();
-
-                } catch (IOException e) {
-                    updateServer("Error: " + e.getMessage());
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-                if (message.equalsIgnoreCase("exit")) break;
-
+            // Read until “exit”
+            while (true) {
+                String msg = serverDis.readUTF();
+                appendServerText("Client: " + msg);
+                if (msg.equalsIgnoreCase("exit")) break;
             }
         } catch (IOException e) {
-            updateServer("Error: " + e.getMessage());
+            appendServerText("Error: " + e.getMessage());
+        } finally {
+            cleanupServer();
         }
     }
 
-    private void updateServer(String message) {
-        // Run on the UI thread
-        javafx.application.Platform.runLater(() -> lb12.setText(message + "\n"));
+    /**
+     * Sends whatever’s in serverMsgText to the client.
+     */
+    private void sendServerMessage() {
+        String msg = serverMsgText.getText().trim();
+        if (msg.isEmpty() || serverDos == null) return;
+
+        try {
+            serverDos.writeUTF(msg);
+            appendServerText("Me: " + msg);
+            serverMsgText.clear();
+
+            if (msg.equalsIgnoreCase("exit")) {
+                cleanupServer();
+            }
+        } catch (IOException ex) {
+            appendServerText("Send failed: " + ex.getMessage());
+        }
     }
 
+    /**
+     * Appends a line to the chat area on the JavaFX thread.
+     */
+    private void appendServerText(String text) {
+        Platform.runLater(() -> serverChatArea.appendText(text + "\n"));
+    }
+
+    /**
+     * Closes streams & socket, and disables Send button again.
+     */
+    private void cleanupServer() {
+        try {
+            if (serverDis != null)    serverDis.close();
+            if (serverDos != null)    serverDos.close();
+            if (clientSocket != null) clientSocket.close();
+        } catch (IOException ignored) {}
+
+        // Disable Send to reflect “no client” state
+        Platform.runLater(() -> serverSendBtn.setDisable(true));
+    }
+
+
+    // ====================
+    // ==== CLIENT SIDE ===
+    // ====================
+
+    // === Class-level fields for client chat functionality ===
+    private Button connectBtn;      // “Connect” button, enabled until connected
+    private Button clientSendBtn;   // “Send” button, disabled until connected
+    private TextField clientMsgText;// Text field where user types messages
+    private TextArea clientChatArea;// Read-only area showing chat history
+    private DataInputStream clientDis;  // Stream for incoming messages from server
+    private DataOutputStream clientDos; // Stream for outgoing messages to server
+    private Socket socket1;            // Underlying TCP socket connection
 
     @FXML
     void startClient(ActionEvent event) {
         Stage stage = new Stage();
-        Group root = new Group();
-        Button connectButton = new Button("Connect to server");
-        connectButton.setLayoutX(100);
-        connectButton.setLayoutY(300);
-        connectButton.setOnAction(this::connectToServer);
-        // new Thread(this::connectToServer).start();
 
-        Label lb11 = new Label("Client");
-        lb11.setLayoutX(100);
-        lb11.setLayoutY(100);
-        msgText = new TextField("msg");
-        msgText.setLayoutX(100);
-        msgText.setLayoutY(150);
+        // Root layout
+        BorderPane root = new BorderPane();
+        root.getStyleClass().add("root-pane");
 
-        lb122 = new Label("info");
-        lb122.setLayoutX(100);
-        lb122.setLayoutY(200);
-        root.getChildren().addAll(lb11, lb122, connectButton, msgText);
+        // — HEADER —
+        Label header = new Label("Client Chat");
+        header.getStyleClass().add("header-label");
+        HBox headerBox = new HBox(header);
+        headerBox.getStyleClass().add("header-box");
+        headerBox.setAlignment(Pos.CENTER);
+        root.setTop(headerBox);
 
+        // — CENTER: chat history —
+        clientChatArea = new TextArea();
+        clientChatArea.setEditable(false);
+        clientChatArea.setWrapText(true);
+        clientChatArea.getStyleClass().add("chat-area");
+        VBox centerBox = new VBox(clientChatArea);
+        centerBox.setPadding(new Insets(10, 20, 10, 20));
+        root.setCenter(centerBox);
 
-        Scene scene = new Scene(root, 600, 350);
+        // — FOOTER: input + buttons —
+        clientMsgText = new TextField();
+        clientMsgText.setPromptText("Type a message...");
+        clientMsgText.getStyleClass().add("message-field");
+        HBox.setHgrow(clientMsgText, Priority.ALWAYS);
+
+        clientSendBtn = new Button("Send");
+        clientSendBtn.setDisable(true);
+        clientSendBtn.getStyleClass().add("send-button");
+        clientSendBtn.setOnAction(e -> sendClientMessage());
+
+        connectBtn = new Button("Connect");
+        connectBtn.getStyleClass().add("send-button");
+        connectBtn.setOnAction(this::connectToServer);
+
+        HBox inputBox = new HBox(10, clientMsgText, clientSendBtn, connectBtn);
+        inputBox.getStyleClass().add("input-box");
+        inputBox.setPadding(new Insets(0, 20, 20, 20));
+        root.setBottom(inputBox);
+
+        // Scene & CSS
+        Scene scene = new Scene(root, 420, 380);
+        scene.getStylesheets().add(getClass().getResource("styles/client.css").toExternalForm());
         stage.setScene(scene);
         stage.setTitle("Client");
         stage.show();
-
-
     }
 
-
+    /**
+     * Attempts to connect to the server at localhost:6666.
+     * On success: enables the Send button, disables Connect, and starts
+     * a background thread to listen for incoming messages.
+     */
     private void connectToServer(ActionEvent event) {
-
-
         try {
+            // 1. Open socket and wrap streams
             socket1 = new Socket("localhost", 6666);
+            clientDis = new DataInputStream(socket1.getInputStream());
+            clientDos = new DataOutputStream(socket1.getOutputStream());
 
-            DataOutputStream dos = new DataOutputStream(socket1.getOutputStream());
-            DataInputStream dis = new DataInputStream(socket1.getInputStream());
+            // 2. Notify user in the chat area
+            appendClientText("Connected to server.");
 
-            dos.writeUTF(msgText.getText());
-            String response = dis.readUTF();
-            updateTextClient("Server response: " + response + "\n");
+            // 3. Enable sending, prevent re-connecting
+            clientSendBtn.setDisable(false);
+            connectBtn.setDisable(true);
 
-            dis.close();
-            dos.close();
-            socket1.close();
-        } catch (Exception e) {
-            updateTextClient("Error: " + e.getMessage() + "\n");
+            // 4. Launch reader thread to handle incoming messages
+            new Thread(() -> {
+                try {
+                    while (true) {
+                        String msg = clientDis.readUTF();       // Block until message arrives
+                        appendClientText("Server: " + msg);     // Display it
+                        if (msg.equalsIgnoreCase("exit")) break; // Exit on “exit”
+                    }
+                } catch (IOException e) {
+                    // Happens on disconnect or stream error
+                    appendClientText("Disconnected.");
+                } finally {
+                    cleanupClient();  // Ensure resources are closed & Connect is re-enabled
+                }
+            }).start();
+
+        } catch (IOException e) {
+            // Connection failed
+            appendClientText("Connection failed: " + e.getMessage());
         }
-
-
     }
 
-    private void updateTextClient(String message) {
-        // Run on the UI thread
-        javafx.application.Platform.runLater(() -> lb122.setText(message + "\n"));
+    /**
+     * Sends the user’s current text over the socket, logs it locally,
+     * and if the message is “exit” triggers a cleanup.
+     */
+    private void sendClientMessage() {
+        try {
+            String msg = clientMsgText.getText();
+            clientDos.writeUTF(msg);            // Send to server
+            appendClientText("Me: " + msg);     // Log locally
+            clientMsgText.clear();              // Clear the input
+
+            // If user typed “exit”, close everything
+            if (msg.equalsIgnoreCase("exit")) {
+                cleanupClient();
+            }
+        } catch (IOException e) {
+            appendClientText("Send failed: " + e.getMessage());
+        }
     }
 
+    /**
+     * Safely append a line of text to the chat area on the JavaFX thread.
+     */
+    private void appendClientText(String text) {
+        Platform.runLater(() -> clientChatArea.appendText(text + "\n"));
+    }
+
+    /**
+     * Closes socket and streams, then re-enables the Connect button
+     * so the user can reconnect if desired.
+     */
+    private void cleanupClient() {
+        try {
+            if (clientDis != null) clientDis.close();
+            if (clientDos != null) clientDos.close();
+            if (socket1 != null)   socket1.close();
+        } catch (IOException ignored) { }
+
+        // Re-enable Connect on the JavaFX thread
+        Platform.runLater(() -> connectBtn.setDisable(false));
+    }
 }
