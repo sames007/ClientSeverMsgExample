@@ -9,7 +9,7 @@ A lightweight JavaFX app that lets you:
 
 1. Clone or download this repo.  
 2. Make sure JavaFX is on your classpath (or your IDE’s library settings).  
-3. Run the `MainController` as a JavaFX application.
+3. Run the `NetworkApplication` as a JavaFX application.
 
 ## Features
 
